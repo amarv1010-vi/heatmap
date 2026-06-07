@@ -13,7 +13,12 @@ import hashlib
 import datetime
 import threading
 
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
+
+# Load secrets from a local .env file if present (no-op in cloud hosts that set
+# real environment variables).
+load_dotenv()
 
 import webex_client
 from analyst import run_analysis

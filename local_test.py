@@ -9,6 +9,10 @@ Use this to confirm the skill-aligned hunt works before wiring up the webhook.
 import sys
 import datetime
 
+from dotenv import load_dotenv
+
+load_dotenv()  # pick up keys from .env
+
 from analyst import run_analysis
 
 

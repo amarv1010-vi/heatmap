@@ -14,6 +14,9 @@ import os
 import sys
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()  # pick up WEBEX_BOT_TOKEN / TARGET_URL from .env if present
 
 WEBEX_API = "https://webexapis.com/v1"
 WEBHOOK_NAME = "competitors-news-messages"
