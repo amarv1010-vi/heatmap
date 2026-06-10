@@ -21,7 +21,7 @@ from flask import Flask, request, jsonify
 load_dotenv()
 
 import webex_client
-from analyst import run_analysis
+from analyst import run_analysis, run_comparison
 from options import parse_options
 
 app = Flask(__name__)
@@ -70,13 +70,34 @@ HELP_TEXT = (
     "- Model: `-opus 4.8` · `-opus 4.7` · `-sonnet 4.6` · `-fable 5` · `-haiku 4.5`\n"
     "- Effort: `high` · `medium` · `low` (deeper reasoning = higher)\n"
     "- Search: `-tavily` · `-brave` (default is Claude web search)\n"
-    "- Example: `top 5 Fortinet SASE news this week -opus 4.8 high -tavily`\n\n"
-    "Default with no flags: Sonnet 4.6, medium effort, Claude web search.\n\n"
+    "- Example: `top 5 Fortinet SASE news this week -opus 4.8 -tavily`\n\n"
+    "**Compare mode** — run the same query side by side:\n"
+    "- `top 5 wifi news -compare opus 4.8 sonnet 4.6` (compare models)\n"
+    "- `top 5 wifi news -compare tavily brave` (compare search engines)\n\n"
+    "Default with no flags: **Sonnet 4.6, high effort, Claude web search.**\n\n"
     "I hunt primary sources first, date every story, tag confidence "
     "([VERIFIED]/[INFERRED]/[UNVERIFIED]/[STALE]) and give you a clickable "
     "URL for every claim. Watchlist: Cisco, Huawei (+eKit), HPE Aruba, Juniper, "
     "Nokia, Extreme, Arista, Ubiquiti, Tellabs, Meter, Nile, Fortinet."
 )
+
+
+def _run_compare(room_id: str, query: str, today: str, variants: list):
+    """Run the query across several variants and post a side-by-side digest."""
+    labels = "  vs  ".join(v["label"] for v in variants)
+    webex_client.send_markdown(
+        room_id,
+        f"🔬 Comparing **{labels}** for: _{query}_\n"
+        f"Running {len(variants)} hunts in parallel, this takes a few minutes…",
+    )
+    results = run_comparison(query, today, variants)
+    for variant, digest in results:
+        header = (
+            f"# 🔬 {variant['label']}\n"
+            f"**{variant['model_label']} · {variant['effort']} effort · "
+            f"{variant['search_label']}**  |  query: _{query}_"
+        )
+        webex_client.send_markdown(room_id, f"{header}\n\n{digest}")
 
 
 def _process(message_id: str):
@@ -92,17 +113,20 @@ def _process(message_id: str):
 
         opts = parse_options(raw)
         query = opts["query"]
+        today = datetime.date.today().isoformat()
+
+        if opts.get("is_compare"):
+            _run_compare(room_id, query, today, opts["compare"])
+            return
+
         used = (
             f"🧠 {opts['model_label']} · {opts['effort']} effort · "
             f"🔎 {opts['search_label']}"
         )
-
         webex_client.send_markdown(
             room_id,
             f"🔎 Hunting: _{query}_\n{used}\nWorking the sources, give me a moment…",
         )
-
-        today = datetime.date.today().isoformat()
         digest = run_analysis(
             query,
             today=today,

@@ -8,6 +8,7 @@ hunts live news. Supports a choice of model, reasoning effort and search engine
 
 import os
 import functools
+from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
 
@@ -156,7 +157,7 @@ def run_analysis(
     user_query: str,
     today: str,
     model: str = None,
-    effort: str = "medium",
+    effort: str = "high",
     search: str = "native",
 ) -> str:
     """Run a single hunt and return the finished digest as markdown."""
@@ -174,3 +175,25 @@ def run_analysis(
     if search == "native":
         return _run_native(client, model, system, user_query, thinking, max_tokens)
     return _run_custom(client, model, system, user_query, thinking, max_tokens, search)
+
+
+def run_comparison(query: str, today: str, variants: list) -> list:
+    """Run the same query under each variant config concurrently.
+
+    Returns a list of (variant, digest) pairs in the original order.
+    """
+    def one(variant):
+        try:
+            digest = run_analysis(
+                query,
+                today=today,
+                model=variant["model"],
+                effort=variant["effort"],
+                search=variant["search"],
+            )
+        except Exception as exc:
+            digest = f"⚠️ Error running this variant: `{exc}`"
+        return variant, digest
+
+    with ThreadPoolExecutor(max_workers=min(len(variants), 4)) as pool:
+        return list(pool.map(one, variants))

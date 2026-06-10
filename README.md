@@ -145,11 +145,21 @@ Append flags at the **end** of any message (after a dash). Order does not matter
 | Search | `-tavily` · `-brave` (omit for Claude's built-in web search) |
 
 Examples:
-- `top 5 Fortinet SASE news this week -opus 4.8 high -tavily`
+- `top 5 Fortinet SASE news this week -opus 4.8 -tavily`
 - `whats new with Juniper -sonnet 4.6 medium`
-- `Arista campus push -fable 5 high -brave`
+- `Arista campus push -fable 5 -brave`
 
-No flags → **Sonnet 4.6, medium effort, Claude web search** (the default).
+No flags → **Sonnet 4.6, high effort, Claude web search** (the default).
+
+### Compare mode
+
+Run the same query side by side across models or search engines with `-compare`:
+
+- `top 5 wifi news -compare opus 4.8 sonnet 4.6` — compare two models
+- `top 5 wifi news -compare tavily brave` — compare two search engines
+- `top 5 wifi news -opus 4.8 -compare tavily brave` — hold model at Opus, compare engines
+
+Each variant runs in parallel and posts as its own labelled digest (max 4 variants).
 
 To use `-tavily` or `-brave`, set `TAVILY_API_KEY` / `BRAVE_API_KEY` in Render's
 Environment Variables (see `.env.example`). Tavily is recommended for news.
