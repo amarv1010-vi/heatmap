@@ -22,6 +22,7 @@ load_dotenv()
 
 import webex_client
 from analyst import run_analysis
+from options import parse_options
 
 app = Flask(__name__)
 
@@ -64,8 +65,13 @@ HELP_TEXT = (
     "Ask me things like:\n"
     "- `look for top 5 HPE Aruba news this week in campus networking`\n"
     "- `what's new with Juniper since last week`\n"
-    "- `weekly roundup across the whole watchlist`\n"
     "- `any data center announcements from Arista in the last 24h`\n\n"
+    "**Optional flags** (add at the end of your question):\n"
+    "- Model: `-opus 4.8` · `-opus 4.7` · `-sonnet 4.6` · `-fable 5` · `-haiku 4.5`\n"
+    "- Effort: `high` · `medium` · `low` (deeper reasoning = higher)\n"
+    "- Search: `-tavily` · `-brave` (default is Claude web search)\n"
+    "- Example: `top 5 Fortinet SASE news this week -opus 4.8 high -tavily`\n\n"
+    "Default with no flags: Sonnet 4.6, medium effort, Claude web search.\n\n"
     "I hunt primary sources first, date every story, tag confidence "
     "([VERIFIED]/[INFERRED]/[UNVERIFIED]/[STALE]) and give you a clickable "
     "URL for every claim. Watchlist: Cisco, Huawei (+eKit), HPE Aruba, Juniper, "
@@ -78,19 +84,33 @@ def _process(message_id: str):
     try:
         msg = webex_client.get_message(message_id)
         room_id = msg["roomId"]
-        query = _strip_mention(msg.get("text", ""))
+        raw = _strip_mention(msg.get("text", ""))
 
-        if not query or query.lower() in {"help", "hi", "hello", "start"}:
+        if not raw or raw.lower() in {"help", "hi", "hello", "start"}:
             webex_client.send_markdown(room_id, HELP_TEXT)
             return
 
+        opts = parse_options(raw)
+        query = opts["query"]
+        used = (
+            f"🧠 {opts['model_label']} · {opts['effort']} effort · "
+            f"🔎 {opts['search_label']}"
+        )
+
         webex_client.send_markdown(
-            room_id, f"🔎 Hunting: _{query}_\nWorking the sources, give me a moment…"
+            room_id,
+            f"🔎 Hunting: _{query}_\n{used}\nWorking the sources, give me a moment…",
         )
 
         today = datetime.date.today().isoformat()
-        digest = run_analysis(query, today=today)
-        webex_client.send_markdown(room_id, digest)
+        digest = run_analysis(
+            query,
+            today=today,
+            model=opts["model"],
+            effort=opts["effort"],
+            search=opts["search"],
+        )
+        webex_client.send_markdown(room_id, f"**{used}**\n\n{digest}")
     except Exception as exc:  # surface failures to the user, never go silent
         try:
             room_id = webex_client.get_message(message_id)["roomId"]

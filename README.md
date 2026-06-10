@@ -129,11 +129,30 @@ type. Examples:
 - `look for top 5 HPE Aruba news this week in campus networking`
 - `what's new with Juniper since last week`
 - `any data center announcements from Arista in the last 24h`
-- `weekly roundup across the whole watchlist`
 - `help`
 
 Every story comes back dated, with a clickable primary-source URL and a
 confidence tag: `[VERIFIED]` / `[INFERRED]` / `[UNVERIFIED]` / `[STALE]`.
+
+### Picking a model and search engine
+
+Append flags at the **end** of any message (after a dash). Order does not matter.
+
+| Flag group | Options |
+|---|---|
+| Model | `-opus 4.8` · `-opus 4.7` · `-sonnet 4.6` · `-fable 5` · `-haiku 4.5` |
+| Effort | `high` · `medium` · `low` (more effort = deeper reasoning budget) |
+| Search | `-tavily` · `-brave` (omit for Claude's built-in web search) |
+
+Examples:
+- `top 5 Fortinet SASE news this week -opus 4.8 high -tavily`
+- `whats new with Juniper -sonnet 4.6 medium`
+- `Arista campus push -fable 5 high -brave`
+
+No flags → **Sonnet 4.6, medium effort, Claude web search** (the default).
+
+To use `-tavily` or `-brave`, set `TAVILY_API_KEY` / `BRAVE_API_KEY` in Render's
+Environment Variables (see `.env.example`). Tavily is recommended for news.
 
 ---
 
