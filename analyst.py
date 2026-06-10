@@ -24,9 +24,6 @@ MAX_WEB_SEARCHES = int(os.environ.get("MAX_WEB_SEARCHES", "12"))
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "8000"))
 MAX_AGENT_TURNS = int(os.environ.get("MAX_AGENT_TURNS", "12"))
 
-# Reasoning effort -> extended-thinking token budget. 0 disables thinking.
-EFFORT_BUDGET = {"high": 5000, "medium": 2000, "low": 0}
-
 # Custom client-side search tool, used for the Tavily / Brave paths.
 SEARCH_TOOL = {
     "name": "web_search",
@@ -73,11 +70,27 @@ def _system_prompt(today: str) -> str:
     )
 
 
-def _thinking_and_max(effort: str):
-    budget = EFFORT_BUDGET.get(effort, 0)
-    if budget <= 0:
-        return None, MAX_TOKENS
-    return {"type": "enabled", "budget_tokens": budget}, budget + MAX_TOKENS
+def _effort_kwargs(effort: str) -> dict:
+    """Adaptive thinking + effort control (the API shape current models use)."""
+    eff = effort if effort in ("high", "medium", "low") else "high"
+    return {"thinking": {"type": "adaptive"}, "output_config": {"effort": eff}}
+
+
+def _create(client, **kwargs):
+    """Call the Messages API, gracefully degrading if a model rejects the
+    thinking/effort controls so older models still work."""
+    try:
+        return client.messages.create(**kwargs)
+    except anthropic.BadRequestError as exc:
+        msg = str(exc).lower()
+        tunables = ("thinking", "output_config", "effort")
+        if any(k in kwargs for k in ("thinking", "output_config")) and any(
+            t in msg for t in tunables
+        ):
+            kwargs.pop("thinking", None)
+            kwargs.pop("output_config", None)
+            return client.messages.create(**kwargs)
+        raise
 
 
 def _extract_text(resp) -> str:
@@ -86,7 +99,7 @@ def _extract_text(resp) -> str:
     return text or "I could not produce a digest for that request. Try rephrasing."
 
 
-def _run_native(client, model, system, query, thinking, max_tokens) -> str:
+def _run_native(client, model, system, query, extra) -> str:
     """Claude's built-in web_search server tool. Default path."""
     tools = [
         {
@@ -98,13 +111,10 @@ def _run_native(client, model, system, query, thinking, max_tokens) -> str:
     messages = [{"role": "user", "content": query}]
     resp = None
     for _ in range(8):
-        kwargs = dict(
-            model=model, max_tokens=max_tokens, system=system,
-            tools=tools, messages=messages,
+        resp = _create(
+            client, model=model, max_tokens=MAX_TOKENS, system=system,
+            tools=tools, messages=messages, **extra,
         )
-        if thinking:
-            kwargs["thinking"] = thinking
-        resp = client.messages.create(**kwargs)
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue
@@ -112,7 +122,7 @@ def _run_native(client, model, system, query, thinking, max_tokens) -> str:
     return _extract_text(resp)
 
 
-def _run_custom(client, model, system, query, thinking, max_tokens, provider) -> str:
+def _run_custom(client, model, system, query, extra, provider) -> str:
     """Agentic loop where the model searches via Tavily or Brave."""
     searcher = (
         search_providers.tavily_search
@@ -122,14 +132,10 @@ def _run_custom(client, model, system, query, thinking, max_tokens, provider) ->
     messages = [{"role": "user", "content": query}]
     resp = None
     for _ in range(MAX_AGENT_TURNS):
-        kwargs = dict(
-            model=model, max_tokens=max_tokens, system=system,
-            tools=[SEARCH_TOOL], messages=messages,
+        resp = _create(
+            client, model=model, max_tokens=MAX_TOKENS, system=system,
+            tools=[SEARCH_TOOL], messages=messages, **extra,
         )
-        if thinking:
-            kwargs["thinking"] = thinking
-        resp = client.messages.create(**kwargs)
-
         if resp.stop_reason == "tool_use":
             messages.append({"role": "assistant", "content": resp.content})
             results = []
@@ -145,7 +151,6 @@ def _run_custom(client, model, system, query, thinking, max_tokens, provider) ->
                     )
             messages.append({"role": "user", "content": results})
             continue
-
         if resp.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": resp.content})
             continue
@@ -161,7 +166,6 @@ def run_analysis(
     search: str = "native",
 ) -> str:
     """Run a single hunt and return the finished digest as markdown."""
-    # Fail fast with a friendly message if a chosen engine has no key.
     if search == "tavily" and not os.environ.get("TAVILY_API_KEY"):
         return "⚠️ Tavily search isn't configured. Add `TAVILY_API_KEY` in Render to use `-tavily`."
     if search == "brave" and not os.environ.get("BRAVE_API_KEY"):
@@ -170,11 +174,11 @@ def run_analysis(
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     model = model or DEFAULT_MODEL
     system = _system_prompt(today)
-    thinking, max_tokens = _thinking_and_max(effort)
+    extra = _effort_kwargs(effort)
 
     if search == "native":
-        return _run_native(client, model, system, user_query, thinking, max_tokens)
-    return _run_custom(client, model, system, user_query, thinking, max_tokens, search)
+        return _run_native(client, model, system, user_query, extra)
+    return _run_custom(client, model, system, user_query, extra, search)
 
 
 def run_comparison(query: str, today: str, variants: list) -> list:
